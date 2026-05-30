@@ -1,0 +1,86 @@
+# RFID BLE Transmitter Design
+
+## Goal
+
+Broadcast each detected MU60x RFID tag EPC over BLE advertising with a
+hardcoded device ID.
+
+## Scope
+
+This firmware is transmitter-only:
+
+- RFID input comes from the MU60x UART driver.
+- BLE output uses non-connectable, non-scannable extended advertising.
+- The BLE payload contains only `device_id,epc_hex`.
+
+Receiver/scanner code, GATT services, Wi-Fi, display publishing, and unrelated
+GASM dependencies are out of scope.
+
+## Data Flow
+
+1. `app_main()` calls `ble_beacon_init()`.
+2. `app_main()` starts `rfid_task`.
+3. `rfid_task` initializes the MU60x reader and starts real-time inventory.
+4. `mu60x_poll()` returns a decoded `mu60x_tag_t` when a tag is detected.
+5. `rfid_task` logs the EPC and calls:
+
+```c
+ble_beacon_publish_tag(DEVICE_ID, tag.epc, tag.epc_len);
+```
+
+6. The BLE component updates the extended advertising payload to the latest
+   observed tag.
+
+## BLE Manufacturer Data
+
+Plaintext logical payload:
+
+```text
+<device_id>,<epc_hex>
+```
+
+Encrypted manufacturer data:
+
+```text
+AD length
+AD type 0xFF
+company id 0x0059
+version
+nonce
+ciphertext
+auth tag
+```
+
+Nonce format:
+
+```text
+reserved byte + 32-bit FNV-1a(device_id) + 64-bit boot counter
+```
+
+The receiver must know the company ID, version, nonce layout, AES key, and
+4-byte CCM tag length.
+
+## Error Handling
+
+RFID polling does not depend on BLE success. If BLE is not ready when a tag is
+first detected, `ble_beacon_publish_tag()` returns `ESP_ERR_INVALID_STATE` and
+the RFID task continues.
+
+Encryption or payload-size failures are logged and the previous advertisement
+payload remains active.
+
+## Verification
+
+Build verification:
+
+```powershell
+idf.py build
+```
+
+Runtime verification:
+
+1. Flash and monitor the ESP32-S3.
+2. Confirm BLE logs `extended advertising started`.
+3. Present an RFID tag.
+4. Confirm the monitor logs the EPC.
+5. Confirm BLE advertising manufacturer data changes for the latest EPC.
