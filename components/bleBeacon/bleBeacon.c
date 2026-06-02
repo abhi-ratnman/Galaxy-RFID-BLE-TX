@@ -9,13 +9,11 @@
 #include "esp_check.h"
 #include "esp_gap_ble_api.h"
 #include "esp_log.h"
-#include "esp_random.h"
-#include "mbedtls/ccm.h"
 #include "nvs_flash.h"
 
 #define TAG "BLE_BEACON"
 
-#define BLE_BEACON_ENCRYPTION_ENABLED 1
+#define BLE_BEACON_ENCRYPTION_ENABLED 0
 #define BLE_BEACON_VERSION 1
 #define BLE_COMPANY_ID_LSB 0x59
 #define BLE_COMPANY_ID_MSB 0x00
@@ -25,13 +23,20 @@
 #define BLE_EXT_ADV_MAX_LEN 229
 #define BLE_PLAINTEXT_MAX_LEN 160
 
+#if BLE_BEACON_ENCRYPTION_ENABLED
+#include "esp_random.h"
+#include "mbedtls/ccm.h"
+
 static const uint8_t s_ble_key[16] = {
     0x52, 0x46, 0x49, 0x44, 0x5F, 0x42, 0x4C, 0x45,
     0x5F, 0x4B, 0x45, 0x59, 0x5F, 0x30, 0x30, 0x31,
 };
+#endif
 
 static bool s_params_ready;
 static bool s_adv_started;
+
+#if BLE_BEACON_ENCRYPTION_ENABLED
 static uint64_t s_tx_counter;
 static mbedtls_ccm_context s_ccm_ctx;
 
@@ -61,6 +66,7 @@ static void build_nonce(uint8_t nonce[BLE_NONCE_LEN], uint32_t hash, uint64_t co
     nonce[11] = (uint8_t)(counter >> 8);
     nonce[12] = (uint8_t)counter;
 }
+#endif
 
 static esp_err_t epc_to_hex(const uint8_t *epc, uint8_t epc_len,
                             char *out, size_t out_size)
@@ -223,9 +229,9 @@ void ble_beacon_init(void)
         return;
     }
 
+#if BLE_BEACON_ENCRYPTION_ENABLED
     s_tx_counter = ((uint64_t)esp_random() << 32) | esp_random();
 
-#if BLE_BEACON_ENCRYPTION_ENABLED
     mbedtls_ccm_init(&s_ccm_ctx);
     int rc = mbedtls_ccm_setkey(&s_ccm_ctx, MBEDTLS_CIPHER_ID_AES,
                                 s_ble_key, sizeof(s_ble_key) * 8u);
