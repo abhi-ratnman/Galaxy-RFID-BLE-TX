@@ -3,7 +3,7 @@
 ## Goal
 
 Broadcast each detected MU60x RFID tag EPC over BLE advertising with a
-hardcoded device ID and optional vehicle door number read from RFID USER
+hardcoded device ID and optional vehicle door number read from RFID EPC
 memory.
 
 ## Scope
@@ -23,8 +23,8 @@ GASM dependencies are out of scope.
 2. `app_main()` starts `rfid_task`.
 3. `rfid_task` initializes the MU60x reader and starts real-time inventory.
 4. `mu60x_poll()` returns a decoded `mu60x_tag_t` when a tag is detected.
-5. For each new EPC, `rfid_task` stops inventory and reads or writes the
-   vehicle door number in USER memory.
+5. For each new EPC, `rfid_task` stops inventory and can write the vehicle door
+   number into EPC memory when write mode is enabled.
 6. `rfid_task` logs the EPC and calls:
 
 ```c
@@ -34,14 +34,17 @@ ble_beacon_publish_tag_data(DEVICE_ID, tag.epc, tag.epc_len, vehicle_door);
 7. The BLE component updates the extended advertising payload to the latest
    observed tag.
 
-## RFID USER Data
+## RFID EPC Data
 
-Vehicle door data is stored in USER bank word address `0`, word count `5`.
-That gives 10 bytes of fixed ASCII storage, zero padded.
+Vehicle door data is stored in EPC bank word address `2`, word count `6`.
+That gives 12 bytes of EPC storage: up to 10 ASCII bytes plus zero padding.
 
 Valid values are 1 to 10 characters using only `0-9`, `A-Z`, and `a-z`.
 Write mode is compile-time controlled from `main/main.c`, then normal firmware
 operation should be returned to read mode.
+
+This changes the RFID tag identity. A door value such as `A123BC4567` is stored
+as EPC bytes `41 31 32 33 42 43 34 35 36 37 00 00`.
 
 ## BLE Manufacturer Data
 

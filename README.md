@@ -47,7 +47,7 @@ idf.py -p COMx flash monitor
    inventory on antenna 1.
 3. Each detected EPC is logged.
 4. For each new EPC, inventory is paused so the firmware can read or write a
-   vehicle door number in RFID USER memory.
+   vehicle door number in RFID EPC memory.
 5. The EPC and optional vehicle door number are published through BLE
    manufacturer data.
 6. The first detected tag also triggers a one-shot TID read demo.
@@ -61,8 +61,15 @@ The device ID is currently hardcoded in `main/main.c`:
 ## Vehicle Door Number Data
 
 The firmware can store a custom vehicle door number of up to 10 alphanumeric
-characters in RFID USER memory. It uses USER bank word address `0`, word count
-`5`, which is exactly 10 bytes of ASCII data padded with zero bytes.
+characters in RFID EPC memory. It writes EPC bank word address `2`, word count
+`6`, which is 12 EPC bytes: up to 10 ASCII bytes plus zero padding.
+
+This intentionally changes the tag EPC identity. For example, door number
+`A123BC4567` becomes EPC bytes:
+
+```text
+41 31 32 33 42 43 34 35 36 37 00 00
+```
 
 The mode is controlled in `main/main.c`:
 
@@ -86,11 +93,12 @@ Write mode:
 #define VEHICLE_DOOR_NUMBER        "A123BC4567"
 ```
 
-After writing one tag and seeing `vehicle door write verified` in the monitor,
-set the mode back to `VEHICLE_DOOR_MODE_READ` and flash again for normal use.
+After writing one tag and seeing `vehicle door EPC write verified` in the
+monitor, set the mode back to `VEHICLE_DOOR_MODE_READ` and flash again for
+normal use.
 
-Only present one tag at a time while reading or writing USER memory. If the log
-says USER read/write failed, the RFID tag may not have writable USER memory.
+Only present one tag at a time while writing EPC memory. If the log says EPC
+write failed, the EPC bank may be locked/password protected.
 
 ## BLE Payload
 
