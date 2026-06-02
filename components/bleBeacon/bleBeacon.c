@@ -15,8 +15,10 @@
 
 #define BLE_BEACON_ENCRYPTION_ENABLED 0
 #define BLE_BEACON_VERSION 1
-#define BLE_COMPANY_ID_LSB 0x59
-#define BLE_COMPANY_ID_MSB 0x00
+#define BLE_COMPANY_ID_LSB 0xFF
+#define BLE_COMPANY_ID_MSB 0xFF
+#define BLE_AD_TYPE_COMPLETE_LOCAL_NAME 0x09
+#define BLE_AD_TYPE_MANUFACTURER_DATA 0xFF
 #define BLE_NONCE_LEN 13
 #define BLE_CCM_TAG_LEN 4
 #define BLE_EXT_ADV_INSTANCE 0
@@ -90,6 +92,7 @@ static esp_err_t epc_to_hex(const uint8_t *epc, uint8_t epc_len,
 static esp_err_t build_plaintext(const char *device_id,
                                  const uint8_t *epc,
                                  uint8_t epc_len,
+                                 const char *vehicle_door,
                                  char plaintext[BLE_PLAINTEXT_MAX_LEN],
                                  size_t *plaintext_len)
 {
@@ -97,8 +100,14 @@ static esp_err_t build_plaintext(const char *device_id,
     ESP_RETURN_ON_ERROR(epc_to_hex(epc, epc_len, epc_hex, sizeof(epc_hex)),
                         TAG, "epc hex");
 
-    int written = snprintf(plaintext, BLE_PLAINTEXT_MAX_LEN, "%s,%s",
+    int written;
+    if (vehicle_door != NULL && vehicle_door[0] != '\0') {
+        written = snprintf(plaintext, BLE_PLAINTEXT_MAX_LEN, "%s,%s,%s",
+                           device_id, epc_hex, vehicle_door);
+    } else {
+        written = snprintf(plaintext, BLE_PLAINTEXT_MAX_LEN, "%s,%s",
                            device_id, epc_hex);
+    }
     if (written <= 0 || written >= BLE_PLAINTEXT_MAX_LEN) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -117,30 +126,58 @@ static esp_err_t start_advertising(void)
     return esp_ble_gap_ext_adv_start(1, &ext_adv);
 }
 
+static esp_err_t append_ad_field(uint8_t *adv_data,
+                                 size_t adv_cap,
+                                 size_t *idx,
+                                 uint8_t type,
+                                 const uint8_t *payload,
+                                 size_t payload_len)
+{
+    if (adv_data == NULL || idx == NULL || payload == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (payload_len + 1u > UINT8_MAX || *idx + payload_len + 2u > adv_cap) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    adv_data[(*idx)++] = (uint8_t)(payload_len + 1u);
+    adv_data[(*idx)++] = type;
+    memcpy(&adv_data[*idx], payload, payload_len);
+    *idx += payload_len;
+    return ESP_OK;
+}
+
 static esp_err_t set_adv_data(const char *device_id,
                               const uint8_t *plaintext,
                               size_t plaintext_len)
 {
     uint8_t adv_data[BLE_EXT_ADV_MAX_LEN] = {0};
-    size_t idx = 1;
+    uint8_t mfg_data[BLE_EXT_ADV_MAX_LEN] = {0};
+    size_t adv_idx = 0;
+    size_t mfg_idx = 0;
 
-    adv_data[idx++] = 0xFF;
-    adv_data[idx++] = BLE_COMPANY_ID_LSB;
-    adv_data[idx++] = BLE_COMPANY_ID_MSB;
-    adv_data[idx++] = BLE_BEACON_VERSION;
+    ESP_RETURN_ON_ERROR(append_ad_field(adv_data, sizeof(adv_data), &adv_idx,
+                                        BLE_AD_TYPE_COMPLETE_LOCAL_NAME,
+                                        (const uint8_t *)device_id,
+                                        strlen(device_id)),
+                        TAG, "adv name");
+
+    mfg_data[mfg_idx++] = BLE_COMPANY_ID_LSB;
+    mfg_data[mfg_idx++] = BLE_COMPANY_ID_MSB;
+    mfg_data[mfg_idx++] = BLE_BEACON_VERSION;
 
 #if BLE_BEACON_ENCRYPTION_ENABLED
     uint8_t nonce[BLE_NONCE_LEN];
     build_nonce(nonce, device_id_hash(device_id), s_tx_counter);
 
-    if (idx + BLE_NONCE_LEN + plaintext_len + BLE_CCM_TAG_LEN > sizeof(adv_data)) {
+    if (mfg_idx + BLE_NONCE_LEN + plaintext_len + BLE_CCM_TAG_LEN > sizeof(mfg_data)) {
         return ESP_ERR_INVALID_SIZE;
     }
 
-    memcpy(&adv_data[idx], nonce, BLE_NONCE_LEN);
-    idx += BLE_NONCE_LEN;
+    memcpy(&mfg_data[mfg_idx], nonce, BLE_NONCE_LEN);
+    mfg_idx += BLE_NONCE_LEN;
 
-    uint8_t *ct_dst = &adv_data[idx];
+    uint8_t *ct_dst = &mfg_data[mfg_idx];
     uint8_t *tag_dst = ct_dst + plaintext_len;
     int rc = mbedtls_ccm_encrypt_and_tag(&s_ccm_ctx, plaintext_len,
                                          nonce, BLE_NONCE_LEN,
@@ -152,23 +189,23 @@ static esp_err_t set_adv_data(const char *device_id,
         return ESP_FAIL;
     }
 
-    idx += plaintext_len + BLE_CCM_TAG_LEN;
+    mfg_idx += plaintext_len + BLE_CCM_TAG_LEN;
     s_tx_counter++;
 #else
-    if (idx + plaintext_len > sizeof(adv_data)) {
+    if (mfg_idx + plaintext_len > sizeof(mfg_data)) {
         return ESP_ERR_INVALID_SIZE;
     }
-    memcpy(&adv_data[idx], plaintext, plaintext_len);
-    idx += plaintext_len;
+    memcpy(&mfg_data[mfg_idx], plaintext, plaintext_len);
+    mfg_idx += plaintext_len;
 #endif
 
-    if (idx - 1 > UINT8_MAX) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-    adv_data[0] = (uint8_t)(idx - 1);
+    ESP_RETURN_ON_ERROR(append_ad_field(adv_data, sizeof(adv_data), &adv_idx,
+                                        BLE_AD_TYPE_MANUFACTURER_DATA,
+                                        mfg_data, mfg_idx),
+                        TAG, "adv manufacturer");
 
     return esp_ble_gap_config_ext_adv_data_raw(BLE_EXT_ADV_INSTANCE,
-                                               (uint16_t)idx,
+                                               (uint16_t)adv_idx,
                                                adv_data);
 }
 
@@ -300,9 +337,10 @@ void ble_beacon_init(void)
     }
 }
 
-esp_err_t ble_beacon_publish_tag(const char *device_id,
-                                 const uint8_t *epc,
-                                 uint8_t epc_len)
+esp_err_t ble_beacon_publish_tag_data(const char *device_id,
+                                      const uint8_t *epc,
+                                      uint8_t epc_len,
+                                      const char *vehicle_door)
 {
     if (device_id == NULL || device_id[0] == '\0' || epc == NULL || epc_len == 0) {
         return ESP_ERR_INVALID_ARG;
@@ -314,7 +352,7 @@ esp_err_t ble_beacon_publish_tag(const char *device_id,
     char plaintext[BLE_PLAINTEXT_MAX_LEN];
     size_t plaintext_len = 0;
     ESP_RETURN_ON_ERROR(build_plaintext(device_id, epc, epc_len,
-                                        plaintext, &plaintext_len),
+                                        vehicle_door, plaintext, &plaintext_len),
                         TAG, "build plaintext");
 
     esp_err_t err = set_adv_data(device_id, (const uint8_t *)plaintext, plaintext_len);
@@ -324,4 +362,11 @@ esp_err_t ble_beacon_publish_tag(const char *device_id,
         ESP_LOGW(TAG, "publish failed: %s", esp_err_to_name(err));
     }
     return err;
+}
+
+esp_err_t ble_beacon_publish_tag(const char *device_id,
+                                 const uint8_t *epc,
+                                 uint8_t epc_len)
+{
+    return ble_beacon_publish_tag_data(device_id, epc, epc_len, NULL);
 }

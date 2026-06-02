@@ -7,7 +7,7 @@ The firmware has two runtime paths:
 
 - `components/mu60x`: polling UART driver for the MU60x host-interface protocol.
 - `components/bleBeacon`: transmitter-only BLE extended advertiser for
-  `device_id,epc_hex` payloads.
+  `device_id,epc_hex[,vehicle_door_number]` payloads.
 
 ## Hardware Wiring
 
@@ -45,8 +45,12 @@ idf.py -p COMx flash monitor
 1. `app_main()` initializes BLE and starts the RFID polling task.
 2. The MU60x driver configures the reader for ETSI, 20 dBm, and real-time
    inventory on antenna 1.
-3. Each detected EPC is logged and published through BLE manufacturer data.
-4. The first detected tag also triggers a one-shot TID read demo.
+3. Each detected EPC is logged.
+4. For each new EPC, inventory is paused so the firmware can read or write a
+   vehicle door number in RFID USER memory.
+5. The EPC and optional vehicle door number are published through BLE
+   manufacturer data.
+6. The first detected tag also triggers a one-shot TID read demo.
 
 The device ID is currently hardcoded in `main/main.c`:
 
@@ -54,36 +58,78 @@ The device ID is currently hardcoded in `main/main.c`:
 #define DEVICE_ID "RFID_001"
 ```
 
+## Vehicle Door Number Data
+
+The firmware can store a custom vehicle door number of up to 10 alphanumeric
+characters in RFID USER memory. It uses USER bank word address `0`, word count
+`5`, which is exactly 10 bytes of ASCII data padded with zero bytes.
+
+The mode is controlled in `main/main.c`:
+
+```c
+#define VEHICLE_DOOR_MODE_READ     0
+#define VEHICLE_DOOR_MODE_WRITE    1
+#define VEHICLE_DOOR_MODE          VEHICLE_DOOR_MODE_READ
+#define VEHICLE_DOOR_NUMBER        "DOOR0001"
+```
+
+Normal read mode:
+
+```c
+#define VEHICLE_DOOR_MODE          VEHICLE_DOOR_MODE_READ
+```
+
+Write mode:
+
+```c
+#define VEHICLE_DOOR_MODE          VEHICLE_DOOR_MODE_WRITE
+#define VEHICLE_DOOR_NUMBER        "A123BC4567"
+```
+
+After writing one tag and seeing `vehicle door write verified` in the monitor,
+set the mode back to `VEHICLE_DOOR_MODE_READ` and flash again for normal use.
+
+Only present one tag at a time while reading or writing USER memory. If the log
+says USER read/write failed, the RFID tag may not have writable USER memory.
+
 ## BLE Payload
 
 Logical plaintext before optional encryption:
 
 ```text
-<device_id>,<epc_hex>
+<device_id>,<epc_hex>[,<vehicle_door_number>]
 ```
 
-Example:
+Examples:
 
 ```text
 RFID_001,E28069150000502DA3F7C197
+RFID_001,E28069150000502DA3F7C197,A123BC4567
 ```
 
-Manufacturer data layout when encryption is enabled:
+Advertising data includes a Complete Local Name field so nRF Connect can show
+`RFID_001` instead of only a MAC address.
+
+Manufacturer data layout:
 
 ```text
-AD length | AD type 0xFF | company id 0x0059 | version | nonce | ciphertext | auth tag
+AD length | AD type 0xFF | company id 0xFFFF | version | payload...
 ```
 
-The firmware uses AES-128-CCM with:
+When encryption is enabled, `payload...` becomes:
 
-- Company ID: `0x0059`
+```text
+nonce | ciphertext | auth tag
+```
+
+The current debug firmware uses plaintext BLE manufacturer data with:
+
+- Company ID: `0xFFFF`
 - Version: `1`
-- Nonce: reserved byte + FNV-1a device-id hash + 64-bit boot counter
-- Auth tag length: 4 bytes
+- Payload: ASCII `device_id,epc_hex[,vehicle_door_number]`
 
-Set `BLE_BEACON_ENCRYPTION_ENABLED` to `0` in
-`components/bleBeacon/bleBeacon.c` for plaintext BLE debugging, then restore it
-to `1` before shipping.
+`0xFFFF` is for local testing only. Use an assigned Bluetooth company ID before
+shipping a product.
 
 ## RFID Region
 

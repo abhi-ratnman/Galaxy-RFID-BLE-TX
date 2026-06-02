@@ -3,7 +3,8 @@
 ## Goal
 
 Broadcast each detected MU60x RFID tag EPC over BLE advertising with a
-hardcoded device ID.
+hardcoded device ID and optional vehicle door number read from RFID USER
+memory.
 
 ## Scope
 
@@ -11,7 +12,7 @@ This firmware is transmitter-only:
 
 - RFID input comes from the MU60x UART driver.
 - BLE output uses non-connectable, non-scannable extended advertising.
-- The BLE payload contains only `device_id,epc_hex`.
+- The BLE payload contains `device_id,epc_hex[,vehicle_door_number]`.
 
 Receiver/scanner code, GATT services, Wi-Fi, display publishing, and unrelated
 GASM dependencies are out of scope.
@@ -22,30 +23,44 @@ GASM dependencies are out of scope.
 2. `app_main()` starts `rfid_task`.
 3. `rfid_task` initializes the MU60x reader and starts real-time inventory.
 4. `mu60x_poll()` returns a decoded `mu60x_tag_t` when a tag is detected.
-5. `rfid_task` logs the EPC and calls:
+5. For each new EPC, `rfid_task` stops inventory and reads or writes the
+   vehicle door number in USER memory.
+6. `rfid_task` logs the EPC and calls:
 
 ```c
-ble_beacon_publish_tag(DEVICE_ID, tag.epc, tag.epc_len);
+ble_beacon_publish_tag_data(DEVICE_ID, tag.epc, tag.epc_len, vehicle_door);
 ```
 
-6. The BLE component updates the extended advertising payload to the latest
+7. The BLE component updates the extended advertising payload to the latest
    observed tag.
+
+## RFID USER Data
+
+Vehicle door data is stored in USER bank word address `0`, word count `5`.
+That gives 10 bytes of fixed ASCII storage, zero padded.
+
+Valid values are 1 to 10 characters using only `0-9`, `A-Z`, and `a-z`.
+Write mode is compile-time controlled from `main/main.c`, then normal firmware
+operation should be returned to read mode.
 
 ## BLE Manufacturer Data
 
 Plaintext logical payload:
 
 ```text
-<device_id>,<epc_hex>
+<device_id>,<epc_hex>[,<vehicle_door_number>]
 ```
 
-Encrypted manufacturer data:
+Advertising data includes:
 
 ```text
-AD length
-AD type 0xFF
-company id 0x0059
-version
+Complete Local Name: RFID_001
+Manufacturer data: company id 0xFFFF | version | payload...
+```
+
+Encrypted manufacturer payload:
+
+```text
 nonce
 ciphertext
 auth tag
@@ -63,7 +78,7 @@ The receiver must know the company ID, version, nonce layout, AES key, and
 ## Error Handling
 
 RFID polling does not depend on BLE success. If BLE is not ready when a tag is
-first detected, `ble_beacon_publish_tag()` returns `ESP_ERR_INVALID_STATE` and
+detected, `ble_beacon_publish_tag_data()` returns `ESP_ERR_INVALID_STATE` and
 the RFID task continues.
 
 Encryption or payload-size failures are logged and the previous advertisement

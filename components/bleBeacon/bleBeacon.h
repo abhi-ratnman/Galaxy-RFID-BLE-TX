@@ -14,6 +14,11 @@ esp_err_t ble_beacon_publish_tag(const char *device_id,
                                  const uint8_t *epc,
                                  uint8_t epc_len);
 
+esp_err_t ble_beacon_publish_tag_data(const char *device_id,
+                                      const uint8_t *epc,
+                                      uint8_t epc_len,
+                                      const char *vehicle_door);
+
 #ifdef __cplusplus
 }
 #endif
