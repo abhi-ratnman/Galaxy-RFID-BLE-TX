@@ -95,10 +95,21 @@ Build verification:
 idf.py build
 ```
 
-Runtime verification:
+Runtime read-mode verification:
 
 1. Flash and monitor the ESP32-S3.
 2. Confirm BLE logs `extended advertising started`.
 3. Present an RFID tag.
 4. Confirm the monitor logs the EPC.
-5. Confirm BLE advertising manufacturer data changes for the latest EPC.
+5. If the EPC contains ASCII door data, confirm the monitor logs
+   `vehicle door number from EPC = ...`.
+6. Confirm BLE advertising manufacturer data changes for the latest EPC.
+
+Runtime write-mode verification:
+
+1. Set `VEHICLE_DOOR_MODE` to `VEHICLE_DOOR_MODE_WRITE`.
+2. Set `VEHICLE_DOOR_NUMBER` to a 1-10 character alphanumeric value.
+3. Flash and present one tag only.
+4. Confirm `vehicle door EPC write verified`.
+5. Return `VEHICLE_DOOR_MODE` to `VEHICLE_DOOR_MODE_READ` and flash again for
+   normal scanning.

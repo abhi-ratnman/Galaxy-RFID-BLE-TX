@@ -100,6 +100,35 @@ normal use.
 Only present one tag at a time while writing EPC memory. If the log says EPC
 write failed, the EPC bank may be locked/password protected.
 
+## Tomorrow Test Checklist
+
+1. Keep normal scan firmware in read mode unless you are intentionally writing:
+
+```c
+#define VEHICLE_DOOR_MODE          VEHICLE_DOOR_MODE_READ
+```
+
+2. To program one tag, set write mode and the target door number:
+
+```c
+#define VEHICLE_DOOR_MODE          VEHICLE_DOOR_MODE_WRITE
+#define VEHICLE_DOOR_NUMBER        "A123BC4567"
+```
+
+3. Flash, present exactly one tag, and wait for:
+
+```text
+vehicle door EPC write verified
+waiting for rewritten EPC to appear in inventory
+```
+
+4. Change back to read mode, flash again, and confirm nRF Connect shows
+   manufacturer data that decodes to:
+
+```text
+RFID_001,<epc_hex>,A123BC4567
+```
+
 ## BLE Payload
 
 Logical plaintext before optional encryption:
