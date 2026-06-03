@@ -231,6 +231,9 @@ esp_err_t mu60x_init(mu60x_t *dev, const mu60x_config_t *cfg)
     esp_err_t err = mu60x_get_version(dev, &ver);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "no response from reader at %d bps (check wiring/baud)", cfg->baud_rate);
+        uart_driver_delete(cfg->uart_num);
+        dev->initialised = false;
+        dev->inventory_running = false;
         return err;
     }
     ESP_LOGI(TAG, "reader v%u.%u model=0x%02X on UART%d", ver.major, ver.minor,

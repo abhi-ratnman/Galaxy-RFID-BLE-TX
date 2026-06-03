@@ -222,9 +222,18 @@ static void rfid_task(void *arg)
         .power_dbm        = 20,
         .persist_settings = true,
     };
-    ESP_ERROR_CHECK(mu60x_init(&s_dev, &cfg));
+    esp_err_t err;
+    while ((err = mu60x_init(&s_dev, &cfg)) != ESP_OK) {
+        ESP_LOGW(TAG, "RFID reader init failed: %s; retrying in 2s",
+                 esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
 
-    ESP_ERROR_CHECK(mu60x_start_inventory(&s_dev, 1));
+    while ((err = mu60x_start_inventory(&s_dev, 1)) != ESP_OK) {
+        ESP_LOGW(TAG, "RFID inventory start failed: %s; retrying in 1s",
+                 esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
     ESP_LOGI(TAG, "inventory running; show a tag to the antenna...");
 
     bool tid_demo_done = false;
@@ -235,7 +244,7 @@ static void rfid_task(void *arg)
 
     while (1) {
         mu60x_tag_t tag;
-        esp_err_t err = mu60x_poll(&s_dev, 500, &tag);
+        err = mu60x_poll(&s_dev, 500, &tag);
         if (err == ESP_ERR_TIMEOUT) continue;
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "poll error: %s", esp_err_to_name(err));
