@@ -209,6 +209,26 @@ static bool epc_matches_vehicle_door_number(const mu60x_tag_t *tag)
     return strcmp(current, VEHICLE_DOOR_NUMBER) == 0;
 }
 
+static esp_err_t init_rfid_reader(mu60x_config_t *cfg)
+{
+    static const int baud_rates[] = { 115200, 57600, 38400, 19200, 9600 };
+
+    for (size_t i = 0; i < sizeof(baud_rates) / sizeof(baud_rates[0]); i++) {
+        cfg->baud_rate = baud_rates[i];
+        ESP_LOGI(TAG, "trying RFID reader at %d bps", cfg->baud_rate);
+
+        esp_err_t err = mu60x_init(&s_dev, cfg);
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+
+        ESP_LOGW(TAG, "RFID reader did not respond at %d bps: %s",
+                 cfg->baud_rate, esp_err_to_name(err));
+    }
+
+    return ESP_ERR_TIMEOUT;
+}
+
 static void rfid_task(void *arg)
 {
     mu60x_config_t cfg = {
@@ -223,8 +243,8 @@ static void rfid_task(void *arg)
         .persist_settings = true,
     };
     esp_err_t err;
-    while ((err = mu60x_init(&s_dev, &cfg)) != ESP_OK) {
-        ESP_LOGW(TAG, "RFID reader init failed: %s; retrying in 2s",
+    while ((err = init_rfid_reader(&cfg)) != ESP_OK) {
+        ESP_LOGW(TAG, "RFID reader init failed on all baud rates: %s; retrying in 2s",
                  esp_err_to_name(err));
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
