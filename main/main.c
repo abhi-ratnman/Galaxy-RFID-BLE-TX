@@ -50,7 +50,7 @@ static const char *TAG = "main";
  */
 #define VEHICLE_DOOR_MODE_READ     0
 #define VEHICLE_DOOR_MODE_WRITE    1
-#define VEHICLE_DOOR_MODE          VEHICLE_DOOR_MODE_READ
+#define VEHICLE_DOOR_MODE          VEHICLE_DOOR_MODE_WRITE
 #define VEHICLE_DOOR_NUMBER        "DOOR0001"
 #define VEHICLE_DOOR_MAX_LEN       10
 #define VEHICLE_DOOR_EPC_WORD_ADDR 2
