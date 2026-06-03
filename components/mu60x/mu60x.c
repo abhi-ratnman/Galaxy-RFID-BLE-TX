@@ -24,6 +24,32 @@ static const char *TAG = "mu60x";
 #define MU60X_TRACE_UART        0
 #endif
 
+static const char *status_name(uint8_t status)
+{
+    switch (status) {
+        case 0x10: return "operation successful";
+        case 0x11: return "operation failed";
+        case 0x22: return "antenna not connected";
+        case 0x32: return "tag read error";
+        case 0x33: return "tag write error";
+        case 0x36: return "inoperable tag";
+        case 0x37: return "inventory ok but access failed";
+        case 0x40: return "access tag error or password error";
+        case 0x41: return "invalid parameter";
+        case 0x43: return "word count exceeds limit";
+        case 0x58: return "two-way authentication failed";
+        case 0x59: return "two-way authentication successful";
+        case 0x60: return "insufficient tag power";
+        case 0x61: return "insufficient tag permissions";
+        case 0x62: return "memory address out of range";
+        case 0x63: return "memory locked";
+        case 0x64: return "incorrect operation password";
+        case 0x65: return "tag authentication reader failed";
+        case 0x66: return "unknown tag error";
+        default:   return "unknown status";
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* LRC + UART helpers                                                 */
 /* ------------------------------------------------------------------ */
@@ -259,7 +285,8 @@ static esp_err_t simple_cmd(mu60x_t *dev, uint8_t cmd,
                         TAG, "simple_cmd");
     /* Most config commands respond with a single status byte: 0x10 = success. */
     if (rlen >= 6 && resp[4] != 0x10) {
-        ESP_LOGW(TAG, "cmd 0x%02X failed, status=0x%02X", cmd, resp[4]);
+        ESP_LOGW(TAG, "cmd 0x%02X failed, status=0x%02X (%s)",
+                 cmd, resp[4], status_name(resp[4]));
         return ESP_ERR_INVALID_RESPONSE;
     }
     return ESP_OK;
@@ -359,7 +386,8 @@ esp_err_t mu60x_start_inventory(mu60x_t *dev, uint8_t ant)
             dev->inventory_running = true;
             return ESP_OK;
         }
-        ESP_LOGW(TAG, "inventory start status=0x%02X (attempt %d)", resp[4], attempt + 1);
+        ESP_LOGW(TAG, "inventory start status=0x%02X (%s) (attempt %d)",
+                 resp[4], status_name(resp[4]), attempt + 1);
         if (attempt == 0) {
             (void)send_frame(dev, 0x8C, NULL, 0);
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -472,7 +500,8 @@ esp_err_t mu60x_read_tag(mu60x_t *dev, mu60x_bank_t bank,
      *            ReadData = PC(2)+EPC(var)+CRC(2) + actual read words (word_count*2 bytes at the tail of ReadData).
      */
     if (rlen == 6) {
-        ESP_LOGW(TAG, "read failed, status=0x%02X", resp[4]);
+        ESP_LOGW(TAG, "read failed, status=0x%02X (%s)",
+                 resp[4], status_name(resp[4]));
         return ESP_ERR_INVALID_RESPONSE;
     }
     /* The last 4 bytes of the data field are: ReadLen(2) | AntID(1) | ReadCount(1).
@@ -515,14 +544,16 @@ esp_err_t mu60x_write_tag(mu60x_t *dev, mu60x_bank_t bank,
      * Success: long frame ending with ... | 0x10 | retry_count. */
     if (rlen == 6) {
         if (resp[4] == 0x10) return ESP_OK;
-        ESP_LOGW(TAG, "write failed, status=0x%02X", resp[4]);
+        ESP_LOGW(TAG, "write failed, status=0x%02X (%s)",
+                 resp[4], status_name(resp[4]));
         return ESP_ERR_INVALID_RESPONSE;
     }
     /* second-to-last byte before LRC is the result. */
     if (rlen < 8) return ESP_ERR_INVALID_RESPONSE;
     uint8_t result = resp[rlen - 3];
     if (result != 0x10) {
-        ESP_LOGW(TAG, "write failed, result=0x%02X", result);
+        ESP_LOGW(TAG, "write failed, result=0x%02X (%s)",
+                 result, status_name(result));
         return ESP_ERR_INVALID_RESPONSE;
     }
     return ESP_OK;

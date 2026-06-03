@@ -170,18 +170,27 @@ static esp_err_t write_vehicle_door_number_to_epc(char out[VEHICLE_DOOR_MAX_LEN 
                         TAG, "vehicle door encode");
 
     ESP_LOGI(TAG, "writing vehicle door number into EPC = %s", VEHICLE_DOOR_NUMBER);
-    esp_err_t err = mu60x_write_tag(&s_dev, MU60X_BANK_EPC,
-                                    VEHICLE_DOOR_EPC_WORD_ADDR,
-                                    raw,
-                                    VEHICLE_DOOR_EPC_WORD_COUNT,
-                                    NULL);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "vehicle door EPC write failed: %s", esp_err_to_name(err));
-        return err;
+    for (uint16_t word = 0; word < VEHICLE_DOOR_EPC_WORD_COUNT; word++) {
+        const uint16_t word_addr = VEHICLE_DOOR_EPC_WORD_ADDR + word;
+        const uint8_t *word_data = &raw[word * 2];
+        ESP_LOGI(TAG, "writing EPC word %u = %02X %02X",
+                 (unsigned)word_addr, word_data[0], word_data[1]);
+
+        esp_err_t err = mu60x_write_tag(&s_dev, MU60X_BANK_EPC,
+                                        word_addr,
+                                        word_data,
+                                        1,
+                                        NULL);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "vehicle door EPC word %u write failed: %s",
+                     (unsigned)word_addr, esp_err_to_name(err));
+            return err;
+        }
+        vTaskDelay(pdMS_TO_TICKS(75));
     }
 
-    vTaskDelay(pdMS_TO_TICKS(100));
-    err = verify_vehicle_door_epc(out);
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_err_t err = verify_vehicle_door_epc(out);
     if (err == ESP_OK && strcmp(out, VEHICLE_DOOR_NUMBER) == 0) {
         ESP_LOGI(TAG, "vehicle door EPC write verified");
         return ESP_OK;
@@ -244,7 +253,7 @@ static void rfid_task(void *arg)
         if (!same_cached_epc) {
             mu60x_stop_inventory(&s_dev);
 
-            if (!tid_demo_done) {
+            if (VEHICLE_DOOR_MODE == VEHICLE_DOOR_MODE_READ && !tid_demo_done) {
                 tid_demo_done = true;
                 uint8_t tid[12] = {0};
                 if (mu60x_read_tag(&s_dev, MU60X_BANK_TID, 0, 6, NULL, tid) == ESP_OK) {
